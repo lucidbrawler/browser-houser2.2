@@ -89,10 +89,19 @@ git push -u origin main
 
 ### Netlify checklist
 
-- [ ] COOP/COEP headers present (DevTools → Network → document response headers)
-- [ ] `crossOriginIsolated === true` in console
-- [ ] Console shows `installed v4` after Start
-- [ ] No need for local Vite proxy on production
+After deploy, hard-refresh the live URL and confirm:
+
+- [ ] Badge is **Isolation OK** (not “Need COOP/COEP”)
+- [ ] Runtime: `crossOriginIsolated` = **true**, SharedArrayBuffer = **available**
+- [ ] DevTools → Network → first document → response headers include:
+  - `Cross-Origin-Opener-Policy: same-origin`
+  - `Cross-Origin-Embedder-Policy: require-corp`
+- [ ] Console after Start shows `installed v4`
+- [ ] Production uses public `wss://warthognode.duckdns.org/ws` (no `/ws-bridge`)
+
+**If isolation is still false:** headers never reached the HTML. This repo sets them in
+`src/middleware.js` (SSR), `netlify.toml`, and `public/_headers`. Redeploy the latest
+commit; do not use a static-only publish that drops SSR.
 
 ## Known behavior
 

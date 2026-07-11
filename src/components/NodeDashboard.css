@@ -167,14 +167,25 @@
   transition: background 0.15s, border-color 0.15s;
 }
 
-.btn:hover {
+.btn:hover:not(:disabled) {
   background: #343f36;
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .btn--active {
   background: rgba(125, 255, 154, 0.12);
   border-color: var(--accent-dim);
   color: var(--accent);
+}
+
+.btn--active:disabled {
+  color: var(--muted);
+  border-color: var(--border);
+  background: #2a332c;
 }
 
 .btn--ghost {

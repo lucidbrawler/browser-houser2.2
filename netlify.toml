@@ -6,12 +6,14 @@
 [functions]
   node_bundler = "esbuild"
 
-# Required for Emscripten pthreads → SharedArrayBuffer (crossOriginIsolated).
+# Isolation headers (belt + suspenders with src/middleware.js for SSR HTML).
+# Without COOP+COEP: crossOriginIsolated=false, SharedArrayBuffer missing, WASM won't run.
 [[headers]]
   for = "/*"
   [headers.values]
     Cross-Origin-Opener-Policy = "same-origin"
     Cross-Origin-Embedder-Policy = "require-corp"
+    Cross-Origin-Resource-Policy = "same-origin"
     X-Content-Type-Options = "nosniff"
     X-Frame-Options = "SAMEORIGIN"
 
@@ -27,3 +29,12 @@
   [headers.values]
     Content-Type = "application/wasm"
     Cross-Origin-Resource-Policy = "same-origin"
+    Cross-Origin-Opener-Policy = "same-origin"
+    Cross-Origin-Embedder-Policy = "require-corp"
+
+[[headers]]
+  for = "/_astro/*"
+  [headers.values]
+    Cross-Origin-Resource-Policy = "same-origin"
+    Cross-Origin-Opener-Policy = "same-origin"
+    Cross-Origin-Embedder-Policy = "require-corp"
