@@ -478,7 +478,7 @@ export default function WasmBrowserNode() {
 
       appendLog(`Using WS_PEERS=${wsPeers}`);
       appendLog(`Official1 bridge flags expected: ${OFFICIAL1.flags?.join(' ')}`);
-      appendLog('Booting public/node WASM (expect log: Warthog Node v0.7.x / Adding websocket peer …)');
+      appendLog('Booting public/node WASM (expect log: Warthog Node v0.9.6 / Adding websocket peer …)');
       appendLog(
         'Handshake v4: settle ~250ms after open, then C++ sends WARTHOG GRUNT? on the wire '
         + '(same as CLI tester). Official1: 1 connect/IP (~30s) — do not probe /ws first.',

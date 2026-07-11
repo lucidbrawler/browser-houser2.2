@@ -3770,7 +3770,6 @@ function assignWasmImports() {
     /** @export */ invoke_diii: invoke_diii,
     /** @export */ invoke_fiii: invoke_fiii,
     /** @export */ invoke_i: invoke_i,
-    /** @export */ invoke_idiii: invoke_idiii,
     /** @export */ invoke_ii: invoke_ii,
     /** @export */ invoke_iid: invoke_iid,
     /** @export */ invoke_iii: invoke_iii,
@@ -3788,17 +3787,13 @@ function assignWasmImports() {
     /** @export */ invoke_iiijiii: invoke_iiijiii,
     /** @export */ invoke_iij: invoke_iij,
     /** @export */ invoke_iiji: invoke_iiji,
-    /** @export */ invoke_iijiii: invoke_iijiii,
-    /** @export */ invoke_iijjiii: invoke_iijjiii,
     /** @export */ invoke_ij: invoke_ij,
-    /** @export */ invoke_ijjiii: invoke_ijjiii,
     /** @export */ invoke_j: invoke_j,
     /** @export */ invoke_ji: invoke_ji,
     /** @export */ invoke_jii: invoke_jii,
     /** @export */ invoke_jiii: invoke_jiii,
     /** @export */ invoke_jiiii: invoke_jiiii,
     /** @export */ invoke_v: invoke_v,
-    /** @export */ invoke_vdiii: invoke_vdiii,
     /** @export */ invoke_vi: invoke_vi,
     /** @export */ invoke_vii: invoke_vii,
     /** @export */ invoke_viii: invoke_viii,
@@ -3820,7 +3815,6 @@ function assignWasmImports() {
     /** @export */ invoke_viji: invoke_viji,
     /** @export */ invoke_vijj: invoke_vijj,
     /** @export */ invoke_vji: invoke_vji,
-    /** @export */ invoke_vjjiii: invoke_vjjiii,
     /** @export */ llvm_eh_typeid_for: _llvm_eh_typeid_for,
     /** @export */ memory: wasmMemory,
     /** @export */ onAPIResult: _onAPIResult,
@@ -3864,13 +3858,9 @@ var ___wasm_call_ctors = createExportWrapper("__wasm_call_ctors", 0);
 
 var ___cxa_free_exception = createExportWrapper("__cxa_free_exception", 1);
 
-var _fflush = createExportWrapper("fflush", 1);
-
-var _pthread_self = () => (_pthread_self = wasmExports["pthread_self"])();
+var _free = createExportWrapper("free", 1);
 
 var _malloc = createExportWrapper("malloc", 1);
-
-var _free = createExportWrapper("free", 1);
 
 var _emscripten_main_runtime_thread_id = createExportWrapper("emscripten_main_runtime_thread_id", 0);
 
@@ -3881,6 +3871,10 @@ var _virtual_post_request = Module["_virtual_post_request"] = createExportWrappe
 var _stream_control = Module["_stream_control"] = createExportWrapper("stream_control", 1);
 
 var _main = Module["_main"] = createExportWrapper("__main_argc_argv", 2);
+
+var _fflush = createExportWrapper("fflush", 1);
+
+var _pthread_self = () => (_pthread_self = wasmExports["pthread_self"])();
 
 var __emscripten_tls_init = createExportWrapper("_emscripten_tls_init", 0);
 
@@ -4137,76 +4131,10 @@ function invoke_viiji(index, a1, a2, a3, a4) {
   }
 }
 
-function invoke_iijiii(index, a1, a2, a3, a4, a5) {
+function invoke_viji(index, a1, a2, a3) {
   var sp = stackSave();
   try {
-    return getWasmTableEntry(index)(a1, a2, a3, a4, a5);
-  } catch (e) {
-    stackRestore(sp);
-    if (!(e instanceof EmscriptenEH)) throw e;
-    _setThrew(1, 0);
-  }
-}
-
-function invoke_iijjiii(index, a1, a2, a3, a4, a5, a6) {
-  var sp = stackSave();
-  try {
-    return getWasmTableEntry(index)(a1, a2, a3, a4, a5, a6);
-  } catch (e) {
-    stackRestore(sp);
-    if (!(e instanceof EmscriptenEH)) throw e;
-    _setThrew(1, 0);
-  }
-}
-
-function invoke_vjjiii(index, a1, a2, a3, a4, a5) {
-  var sp = stackSave();
-  try {
-    getWasmTableEntry(index)(a1, a2, a3, a4, a5);
-  } catch (e) {
-    stackRestore(sp);
-    if (!(e instanceof EmscriptenEH)) throw e;
-    _setThrew(1, 0);
-  }
-}
-
-function invoke_ijjiii(index, a1, a2, a3, a4, a5) {
-  var sp = stackSave();
-  try {
-    return getWasmTableEntry(index)(a1, a2, a3, a4, a5);
-  } catch (e) {
-    stackRestore(sp);
-    if (!(e instanceof EmscriptenEH)) throw e;
-    _setThrew(1, 0);
-  }
-}
-
-function invoke_vdiii(index, a1, a2, a3, a4) {
-  var sp = stackSave();
-  try {
-    getWasmTableEntry(index)(a1, a2, a3, a4);
-  } catch (e) {
-    stackRestore(sp);
-    if (!(e instanceof EmscriptenEH)) throw e;
-    _setThrew(1, 0);
-  }
-}
-
-function invoke_idiii(index, a1, a2, a3, a4) {
-  var sp = stackSave();
-  try {
-    return getWasmTableEntry(index)(a1, a2, a3, a4);
-  } catch (e) {
-    stackRestore(sp);
-    if (!(e instanceof EmscriptenEH)) throw e;
-    _setThrew(1, 0);
-  }
-}
-
-function invoke_vji(index, a1, a2) {
-  var sp = stackSave();
-  try {
-    getWasmTableEntry(index)(a1, a2);
+    getWasmTableEntry(index)(a1, a2, a3);
   } catch (e) {
     stackRestore(sp);
     if (!(e instanceof EmscriptenEH)) throw e;
@@ -4348,17 +4276,6 @@ function invoke_iiiiiiii(index, a1, a2, a3, a4, a5, a6, a7) {
   }
 }
 
-function invoke_viji(index, a1, a2, a3) {
-  var sp = stackSave();
-  try {
-    getWasmTableEntry(index)(a1, a2, a3);
-  } catch (e) {
-    stackRestore(sp);
-    if (!(e instanceof EmscriptenEH)) throw e;
-    _setThrew(1, 0);
-  }
-}
-
 function invoke_viijjj(index, a1, a2, a3, a4, a5) {
   var sp = stackSave();
   try {
@@ -4418,6 +4335,17 @@ function invoke_iiijiii(index, a1, a2, a3, a4, a5, a6) {
   var sp = stackSave();
   try {
     return getWasmTableEntry(index)(a1, a2, a3, a4, a5, a6);
+  } catch (e) {
+    stackRestore(sp);
+    if (!(e instanceof EmscriptenEH)) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_vji(index, a1, a2) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1, a2);
   } catch (e) {
     stackRestore(sp);
     if (!(e instanceof EmscriptenEH)) throw e;

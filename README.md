@@ -4,10 +4,11 @@ Run a real **Warthog full node in the browser** (Emscripten WASM + pthreads + OP
 
 | Piece | Location |
 |--------|----------|
-| WASM triad | `public/node/wart-node.{js,wasm,worker.js}` (v0.7.58) |
+| WASM triad | `public/node/wart-node.{js,wasm,worker.js}` (**v0.9.6**, matches Official1) |
 | UI | `src/components/WasmBrowserNode.jsx` |
 | Boot + WS glue | `src/lib/wasmNode.js` |
 | Official1 defaults | `src/lib/bridge.js` → `wss://warthognode.duckdns.org/ws` |
+| Rebuild notes | `public/node/BUILD_INFO.md` |
 
 ## Requirements
 

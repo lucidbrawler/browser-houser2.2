@@ -51,8 +51,8 @@ function unpackVersion(u32) {
   return `${(v >> 16) & 0xff}.${(v >> 8) & 0xff}.${v & 0xff}`;
 }
 
-/** WASM public/node is v0.7.58 */
-const CLIENT = { major: 0, minor: 7, patch: 58 };
+/** WASM public/node is v0.9.6 (matches Official1 bridge) */
+const CLIENT = { major: 0, minor: 9, patch: 6 };
 
 function buildConnectGrunt(version = CLIENT, port = 0) {
   const buf = Buffer.alloc(24);
@@ -83,9 +83,9 @@ async function main() {
 
   const grunt = buildConnectGrunt();
   log('GRUNT hex:', grunt.toString('hex'));
-  // Sanity: wrong packing was (7<<16)|(58<<8)|0 → 00073a00 (7.58.0)
-  // correct 0.7.58 → 0000073a
-  if (grunt.readUInt32BE(14) !== packVersion(0, 7, 58)) {
+  // Sanity: wrong packing was (9<<16)|(6<<8)|0 → 00090600 (9.6.0)
+  // correct 0.9.6 → 00000906
+  if (grunt.readUInt32BE(14) !== packVersion(0, 9, 6)) {
     console.error('BUG: version packing mismatch');
     process.exit(3);
   }

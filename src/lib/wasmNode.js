@@ -493,7 +493,7 @@ async function loadEmscriptenFactory(glueUrl = NODE_GLUE_URL) {
 /**
  * Pack NodeVersion the same way as core `NodeVersion(major, minor, patch)`:
  *   (major << 16) | (minor << 8) | patch   — network byte order on the wire.
- * WASM public/node build advertises 0.7.58 (see wart-node.wasm strings).
+ * WASM public/node build advertises 0.9.6 (matches Official1 bridge).
  */
 export function packNodeVersion(major, minor, patch) {
   return ((major & 0xff) << 16) | ((minor & 0xff) << 8) | (patch & 0xff);
@@ -509,8 +509,8 @@ export function unpackNodeVersion(u32) {
   };
 }
 
-/** This browser WASM node version (must match public/node wart-node build). */
-export const WASM_NODE_VERSION = { major: 0, minor: 7, patch: 58 };
+/** This browser WASM node version (must match public/node wart-node build / Official1). */
+export const WASM_NODE_VERSION = { major: 0, minor: 9, patch: 6 };
 
 /**
  * Build outbound "WARTHOG GRUNT?" (24 bytes) — core ConnectionBase::send_handshake outbound.
