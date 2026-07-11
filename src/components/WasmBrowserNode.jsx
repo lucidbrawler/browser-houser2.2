@@ -40,6 +40,8 @@ export default function WasmBrowserNode() {
   const [status, setStatus] = useState('Ready — click Start full node');
   const [running, setRunning] = useState(false);
   const [starting, setStarting] = useState(false);
+  /** True while killing workers and waiting for OPFS/socket settle. */
+  const [stopping, setStopping] = useState(false);
   /** True when SQLite/OPFS failed mid-run — node is not healthy even if workers still exist. */
   const [storageFatal, setStorageFatal] = useState(false);
   const [clearingOpfs, setClearingOpfs] = useState(false);
@@ -242,14 +244,20 @@ export default function WasmBrowserNode() {
   const nodeHealthy = running && !storageFatal;
 
   const canStart = useMemo(
-    () => isolated && sab && !running && !starting && !storageFatal && !clearingOpfs,
-    [isolated, sab, running, starting, storageFatal, clearingOpfs],
+    () => isolated && sab && !running && !starting && !stopping && !storageFatal && !clearingOpfs,
+    [isolated, sab, running, starting, stopping, storageFatal, clearingOpfs],
+  );
+
+  /** Stop only while a node is (or was) running — not mid-start or mid-recover. */
+  const canStop = useMemo(
+    () => running && !starting && !stopping && !clearingOpfs,
+    [running, starting, stopping, clearingOpfs],
   );
 
   /** Allow clear while broken; block only during a healthy run or mid-start. */
   const canClearOpfs = useMemo(
-    () => opfsOk && !starting && !clearingOpfs && (!running || storageFatal),
-    [opfsOk, starting, clearingOpfs, running, storageFatal],
+    () => opfsOk && !starting && !stopping && !clearingOpfs && (!running || storageFatal),
+    [opfsOk, starting, stopping, clearingOpfs, running, storageFatal],
   );
 
   const handleOpfsReadonly = useCallback((sourceText) => {
@@ -419,7 +427,7 @@ export default function WasmBrowserNode() {
    * Next document runs bootstrap wipe before React/WASM can re-lock files.
    */
   const recoverOpfs = async () => {
-    if (starting || clearingOpfs) return;
+    if (starting || stopping || clearingOpfs) return;
     setClearingOpfs(true);
     setError(null);
     startedRef.current = false;
@@ -442,8 +450,38 @@ export default function WasmBrowserNode() {
     }
   };
 
+  /**
+   * Hard-stop this tab's WASM node: kill workers, reset live UI state.
+   * Leaves OPFS (chain/peers DBs) intact so Start can resume without reload.
+   */
+  const stop = async () => {
+    if (!running || starting || stopping || clearingOpfs) return;
+    setStopping(true);
+    setError(null);
+    setStatus('Stopping…');
+    appendLog('Stopping node — terminating workers (local chain data kept)…');
+    try {
+      terminateWasmWorkers(appendLog);
+    } catch (err) {
+      appendLog(`Stop warning: ${err?.message || err}`);
+    }
+    startedRef.current = false;
+    setRunning(false);
+    setProgress(null);
+    setChain(null);
+    setPeerCount(0);
+    setPeers([]);
+    setMempoolCount(0);
+    setMempool([]);
+    // OPFS exclusive handles + bridge sockets release slightly after worker death.
+    await new Promise((r) => setTimeout(r, 600));
+    setStatus('Stopped — click Start to run again');
+    appendLog('Node stopped. OPFS unchanged. You can Start again (wait a few seconds if reconnect fails).');
+    setStopping(false);
+  };
+
   const start = async () => {
-    if (startedRef.current || starting || storageFatal || storageFatalRef.current) return;
+    if (startedRef.current || starting || stopping || storageFatal || storageFatalRef.current) return;
     setStarting(true);
     setError(null);
     storageFatalRef.current = false;
@@ -543,380 +581,455 @@ export default function WasmBrowserNode() {
     }
   };
 
+  const browserReady = isolated && sab && opfsOk;
+  const badgeClass = storageFatal
+    ? 'is-bad'
+    : nodeHealthy
+      ? 'is-ok'
+      : browserReady
+        ? 'is-ok'
+        : 'is-warn';
+  const badgeLabel = storageFatal
+    ? 'Needs fix'
+    : nodeHealthy
+      ? 'Running'
+      : browserReady
+        ? 'Ready'
+        : 'Setup needed';
+
+  const friendlyStatus = (() => {
+    if (storageFatal) {
+      return 'Storage is locked. Close other tabs on this site, then use Recover below.';
+    }
+    if (stopping) return 'Stopping your node…';
+    if (nodeHealthy) {
+      if (chain?.height != null) {
+        return `Your node is live on the network · block #${chain.height}`;
+      }
+      return 'Your node is running — connecting to the network…';
+    }
+    if (starting) return 'Starting your node — this can take a moment…';
+    if (!isolated || !sab) {
+      return 'This page needs a special browser mode. Use Chrome/Edge via the normal site link, not a bare IP.';
+    }
+    if (!opfsOk) {
+      return 'This browser cannot store the chain. Please use Chrome or Edge on HTTPS (or localhost).';
+    }
+    if (status?.startsWith('Stopped')) {
+      return 'Node stopped. Local data is kept — press Start when you want to run again.';
+    }
+    if (bridgeHttp.state === 'ok') {
+      return `Network is reachable${bridgeHttp.height != null ? ` (height #${bridgeHttp.height})` : ''}. Press Start to run a full node in this tab.`;
+    }
+    if (bridgeHttp.state === 'checking') return 'Checking network…';
+    if (bridgeHttp.state === 'bad') {
+      return 'Could not reach the public network probe — you can still try Start.';
+    }
+    return status || 'Ready when you are.';
+  })();
+
+  const displayPeerCount = peerCount || peers.length;
+  const displayMempoolCount = mempoolCount || mempool.length;
+
   return (
     <div className="dash">
       <header className="dash__header">
         <div className="dash__brand">
           <img src="/img/main_logo.png" alt="" className="dash__logo" />
           <div>
-            <h1>Warthog Browser Full Node</h1>
+            <h1>Warthog in your browser</h1>
             <p className="dash__subtitle">
-              WASM · pthreads · in-tab full node (not a remote RPC client)
+              Run a full node in this tab — no install required
             </p>
           </div>
         </div>
-        <div className={`dash__badge ${storageFatal ? 'is-bad' : nodeHealthy ? 'is-ok' : isolated && sab ? 'is-ok' : 'is-bad'}`}>
-          {storageFatal
-            ? 'OPFS locked'
-            : nodeHealthy
-              ? 'Node running'
-              : isolated && sab
-                ? 'Isolation OK'
-                : 'Need COOP/COEP'}
-        </div>
+        <div className={`dash__badge ${badgeClass}`}>{badgeLabel}</div>
       </header>
 
-      <section className="panel">
-        <h2>Runtime checks</h2>
-        <div className="chain-grid">
-          <Stat label="crossOriginIsolated" value={isolated ? 'true' : 'false'} />
-          <Stat label="SharedArrayBuffer" value={sab ? 'available' : 'missing'} />
-          <Stat label="OPFS" value={opfsOk ? 'available' : 'missing'} />
-          <Stat label="Mode" value="Full WASM node" />
-        </div>
-        {(!isolated || !sab) && (
-          <div className="dash__error" style={{ marginTop: '0.75rem' }}>
-            This page must be served with{' '}
-            <code>Cross-Origin-Opener-Policy: same-origin</code> and{' '}
-            <code>Cross-Origin-Embedder-Policy: require-corp</code> so pthreads can use
-            SharedArrayBuffer. Use <code>npm run dev</code> (headers enabled) or deploy via
-            Netlify (<code>netlify.toml</code>). Open with <code>localhost</code>, not a bare IP,
-            when testing locally.
-          </div>
-        )}
-        {isolated && sab && !opfsOk && (
-          <div className="dash__error" style={{ marginTop: '0.75rem' }}>
-            OPFS is missing — the node cannot write <code>/opfs/chain.db3</code>. Use a Chromium
-            browser on a secure origin (<code>http://127.0.0.1</code> or HTTPS).
-          </div>
-        )}
-      </section>
-
-      <section className="panel panel--controls">
-        <h2 style={{ margin: 0 }}>Official1 bridge (upgraded)</h2>
-        <p className="muted small" style={{ margin: 0 }}>
-          <strong>{OFFICIAL1.name}</strong> (<code className="mono">{OFFICIAL1.host}</code>) —
-          full node + <code>/ws</code> P2P bridge
-          {OFFICIAL1.webrtc ? ' + WebRTC' : ''}.
-          Default <code className="mono">WS_PEERS={OFFICIAL1.wsBridge}</code>
-          {' '}· override <code className="mono">?peers=wss://…</code>
-          {' '}(multiple peers: <code className="mono">;</code>-separated).
-        </p>
-        <div className="status-row" style={{ marginBottom: 0 }}>
-          <div className="status-card">
-            <span className="label">HTTP /chain/head</span>
-            <span>
-              {bridgeHttp.state === 'ok' && (
-                <>OK · #{bridgeHttp.height ?? '—'}{bridgeHttp.synced != null ? ` · synced=${String(bridgeHttp.synced)}` : ''}</>
-              )}
-              {bridgeHttp.state === 'bad' && `Down · ${bridgeHttp.error}`}
-              {bridgeHttp.state === 'checking' && 'Checking…'}
-              {bridgeHttp.state === 'idle' && '—'}
-            </span>
-          </div>
-          <div className="status-card">
-            <span className="label">/ws P2P bridge</span>
-            <span>
-              {bridgeWs.state === 'ok' && `OPEN · ${bridgeWs.openedMs ?? '?'}ms`}
-              {bridgeWs.state === 'bad' && `Not ready · ${bridgeWs.detail}`}
-              {bridgeWs.state === 'skipped' && 'Skip probe · Start uses real GRUNT'}
-              {bridgeWs.state === 'checking' && 'Checking…'}
-              {bridgeWs.state === 'idle' && '—'}
-            </span>
-          </div>
-          <div className="status-card">
-            <span className="label">/stream (optional RPC)</span>
-            <span>
-              {bridgeStream.state === 'ok' && `OPEN · ${bridgeStream.openedMs ?? '?'}ms`}
-              {bridgeStream.state === 'bad' && `Fail · ${bridgeStream.detail}`}
-              {bridgeStream.state === 'skipped' && 'Skipped · not used by WASM full node'}
-              {bridgeStream.state === 'checking' && 'Checking…'}
-              {bridgeStream.state === 'idle' && '—'}
-            </span>
-          </div>
-        </div>
-        {(bridgeWs.state === 'skipped' || bridgeWs.state === 'ok') && bridgeHttp.state === 'ok' && (
-          <div className="dash__ok">
-            Official1 HTTP OK
-            {bridgeHttp.height != null ? ` · height #${bridgeHttp.height}` : ''}.
-            {bridgeWs.state === 'skipped'
-              ? ' P2P /ws is not auto-probed (Official1 allows ~1 connect per IP; probing would steal the WASM handshake slot).'
-              : ` /ws probe OPEN (${bridgeWs.openedMs ?? '?'}ms) — wait ≥30s before Start if you just probed.`}
-            {isolated && sab
-              ? ' Isolation OK → click Start full WASM node.'
-              : ' Fix COOP/COEP (Isolation) before starting WASM.'}
-            {isLocalDevHost() && (
-              <>
-                {' '}On localhost prefer <strong>Use local /ws-bridge</strong> so the browser
-                dials same-origin and Vite proxies to Official1 (restart <code className="mono">npm run dev</code> once).
-              </>
-            )}
-            {' '}Terminal GRUNT:{' '}
-            <code className="mono">npm run test:handshake</code>
-            {' '}· VPS:{' '}
-            <code className="mono">journalctl -u warthog-api.service -f | grep -iE &apos;websocket|webrtc&apos;</code>
-          </div>
-        )}
-        {bridgeWs.state === 'bad' && (
-          <div className="dash__error">
-            Probe could not open <code>{wsPeers || OFFICIAL1.wsBridge}</code>
-            {bridgeWs.detail ? ` (${bridgeWs.detail})` : ''}.
-            {' '}You can still click <strong>Start full WASM node</strong> if Isolation is OK.
-            {' '}If Start also fails:
-            <ul className="dash__checklist">
-              <li>
-                Wait <strong>20 minutes</strong> if a prior failed handshake banned your IP, or unban on VPS.
-              </li>
-              <li>
-                <strong>Node</strong>:{' '}
-                <code className="mono">--ws-port=10001 --ws-bind-localhost --ws-x-forwarded-for --enable-webrtc</code>
-              </li>
-              <li>
-                <strong>Nginx</strong> <code className="mono">location /ws</code> →{' '}
-                <code className="mono">http://127.0.0.1:10001/</code> (trailing slash) with Upgrade +{' '}
-                <code className="mono">X-Forwarded-For</code>. No ACAO on the 101.
-              </li>
-              <li>
-                Laptop: <code className="mono">bash docs/vps-handoff/verify-bridge.sh</code>
-                {' '}then <code className="mono">node scripts/test-grunt-handshake.mjs</code>
-              </li>
-            </ul>
-          </div>
-        )}
-        {bridgeHttp.state === 'bad' && (
-          <div className="dash__error" style={{ opacity: 0.9 }}>
-            HTTP probe failed ({bridgeHttp.error}). WASM may still reach <code>/ws</code>.
-            HTTP checks use <code>/api/proxy</code> (required under COEP).
-          </div>
-        )}
-        <details className="dash__help">
-          <summary>What does WASM need? (app vs nginx vs node)</summary>
-          <ol className="dash__checklist">
-            <li>
-              <strong>This project (browser)</strong> — COOP/COEP isolation, WASM triad under{' '}
-              <code className="mono">/node/</code>, <code className="mono">WS_PEERS=wss://…/ws</code>. You already have Isolation OK.
-            </li>
-            <li>
-              <strong>Node flags (VPS)</strong> — enable the P2P websocket server and honor proxy IPs:{' '}
-              <code className="mono">{OFFICIAL1.flags?.join(' ')}</code>
-            </li>
-            <li>
-              <strong>Nginx (VPS)</strong> — terminate TLS and proxy browser upgrades to localhost:10001.
-              Repo sketch: <code className="mono">nginx-official1-bridge.conf</code>.
-            </li>
-          </ol>
-          <p className="muted small" style={{ marginBottom: 0 }}>
-            <code>/stream</code> is only for RPC dashboards (uWebSockets). The full WASM node only needs{' '}
-            <code>/ws</code>. Bare clients often close with 1006 after open — that is normal; success is onopen.
-          </p>
-        </details>
-        <div className="controls__custom">
-          <input
-            type="text"
-            value={peersInput}
-            onChange={(e) => setPeersInput(e.target.value)}
-            disabled={running || starting}
-            placeholder={OFFICIAL1.wsBridge}
-          />
-          <button type="button" className="btn" onClick={applyPeers} disabled={running || starting}>
-            Save + re-probe
-          </button>
-          <button type="button" className="btn btn--ghost" onClick={useOfficial1} disabled={running || starting}>
-            Use public Official1
-          </button>
-          {isLocalDevHost() && (
-            <button type="button" className="btn btn--ghost" onClick={useLocalProxy} disabled={running || starting}>
-              Use local /ws-bridge
-            </button>
-          )}
+      <section className="panel hero">
+        <p className="hero__status">{friendlyStatus}</p>
+        <div className="hero__actions">
           <button
             type="button"
-            className="btn btn--ghost"
-            onClick={testRawWs}
-            disabled={running || starting}
-            title="Open WebSocket only — burns public /ws slot if pointed at Official1"
-          >
-            Test raw open
-          </button>
-          <button
-            type="button"
-            className="btn btn--ghost"
-            onClick={() => runBridgeProbes(wsPeers, { probeP2pWs: false, probeStream: false })}
-            disabled={running || starting}
-          >
-            Re-probe HTTP
-          </button>
-          <button
-            type="button"
-            className="btn btn--ghost"
-            onClick={() => runBridgeProbes(wsPeers, { probeP2pWs: true })}
-            disabled={running || starting}
-            title="Opens P2P /ws — burns Official1 per-IP slot for ~30s"
-          >
-            Probe /ws (burns slot)
-          </button>
-          <button
-            type="button"
-            className="btn btn--ghost"
-            onClick={clearOpfs}
-            disabled={!canClearOpfs}
-            title="Delete /opfs chain+peers DBs for this origin (fixes readonly SQLite locks)"
-          >
-            {clearingOpfs ? 'Clearing OPFS…' : 'Clear OPFS'}
-          </button>
-          <button
-            type="button"
-            className="btn btn--ghost"
-            onClick={recoverOpfs}
-            disabled={starting || clearingOpfs || !opfsOk}
-            title="Clear OPFS if possible, then hard-reload so pthread locks die (best fix for readonly DB)"
-          >
-            Recover (clear + reload)
-          </button>
-        </div>
-        {storageFatal && (
-          <div className="dash__error" style={{ marginTop: '0.75rem' }}>
-            <strong>Storage locked</strong> (OPFS exclusive handles on{' '}
-            <code className="mono">chain.db3 / peers_v2.db3 / rxtx.db3</code>).
-            <ol className="dash__checklist" style={{ marginTop: '0.5rem', marginBottom: 0 }}>
-              <li>
-                Close <strong>every</strong> other tab/window on this same host:port
-                (duplicates count — only this one tab may stay open).
-              </li>
-              <li>
-                Click <strong>Recover (clear + reload)</strong> once. Wait for console line{' '}
-                <code className="mono">OPFS bootstrap wipe OK</code>.
-              </li>
-              <li>
-                If wipe still fails: F12 → <strong>Application</strong> → Storage →{' '}
-                <strong>Clear site data</strong> → hard-refresh → Start once.
-              </li>
-              <li>
-                Do <strong>not</strong> click Probe /ws before Start (burns Official1 handshake slot).
-              </li>
-            </ol>
-          </div>
-        )}
-        <div className="controls__meta">
-          <span className="mono muted small">WS_PEERS={wsPeers}</span>
-          <button
-            type="button"
-            className="btn btn--active"
+            className={`btn btn--start${nodeHealthy ? ' is-running' : ''}`}
             onClick={start}
             disabled={!canStart}
           >
             {starting
               ? 'Starting…'
-              : storageFatal
-                ? 'Fix OPFS first'
-                : nodeHealthy
-                  ? 'Node running'
-                  : 'Start full WASM node'}
+              : stopping
+                ? 'Please wait…'
+                : storageFatal
+                  ? 'Fix storage first'
+                  : nodeHealthy
+                    ? 'Node is running'
+                    : 'Start node'}
           </button>
-        </div>
-        {error && <div className="dash__error">{error}</div>}
-        <div className="status-card" style={{ marginTop: '0.5rem' }}>
-          <span className="label">Status</span>
-          <span>{status}</span>
-          {progress && (
-            <progress value={progress.value} max={progress.max} style={{ width: '100%' }} />
+          {(running || stopping) && (
+            <button
+              type="button"
+              className="btn btn--stop"
+              onClick={stop}
+              disabled={!canStop}
+              title="Stop the node in this tab (keeps local chain data)"
+            >
+              {stopping ? 'Stopping…' : 'Stop node'}
+            </button>
           )}
         </div>
-      </section>
-
-      <section className="panel chain-panel">
-        <h2>
-          Chain
-          {chain?.height != null && <span className="chain-height"> #{chain.height}</span>}
-        </h2>
-        {chain ? (
-          <div className="chain-grid">
-            <Stat label="Height" value={String(chain.height)} />
-            <Stat label="Difficulty" value={formatHashrate(chain.difficulty)} />
-            <Stat label="Worksum" value={formatHashrate(chain.worksum)} />
+        {progress && (
+          <progress
+            className="hero__progress"
+            value={progress.value}
+            max={progress.max}
+          />
+        )}
+        {!nodeHealthy && !storageFatal && !stopping && browserReady && (
+          <p className="hero__hint">
+            Keep this tab open. Only one tab per site can run the node at a time.
+          </p>
+        )}
+        {error && <div className="dash__error" style={{ marginTop: '0.85rem', textAlign: 'left' }}>{error}</div>}
+        {storageFatal && (
+          <div className="dash__error" style={{ marginTop: '0.85rem', textAlign: 'left' }}>
+            <strong>Storage locked</strong> — another tab may still be using this site&apos;s data.
+            <ol className="dash__checklist">
+              <li>Close every other tab or window on this same site.</li>
+              <li>
+                Open <strong>Advanced</strong> below and click <strong>Recover</strong> once.
+              </li>
+              <li>If that fails: clear site data in the browser, refresh, then Start once.</li>
+            </ol>
+            <div className="controls__actions" style={{ marginTop: '0.65rem' }}>
+              <button
+                type="button"
+                className="btn btn--danger-ghost"
+                onClick={recoverOpfs}
+                disabled={starting || clearingOpfs || !opfsOk}
+              >
+                {clearingOpfs ? 'Recovering…' : 'Recover & reload'}
+              </button>
+            </div>
           </div>
-        ) : (
-          <p className="muted">Waiting for onChain events from the in-browser node…</p>
         )}
       </section>
 
-      <div className="two-col">
+      <div className="snapshot" aria-label="Network snapshot">
+        <div className="snapshot__card">
+          <span className="snapshot__label">Block height</span>
+          <span className="snapshot__value">
+            {chain?.height != null ? `#${chain.height}` : '—'}
+          </span>
+          {chain?.difficulty != null && (
+            <span className="snapshot__sub">{formatHashrate(chain.difficulty)}</span>
+          )}
+        </div>
+        <div className="snapshot__card">
+          <span className="snapshot__label">Connections</span>
+          <span className="snapshot__value">{nodeHealthy || peers.length ? displayPeerCount : '—'}</span>
+          <span className="snapshot__sub">
+            {nodeHealthy ? (displayPeerCount === 1 ? 'peer' : 'peers') : 'after start'}
+          </span>
+        </div>
+        <div className="snapshot__card">
+          <span className="snapshot__label">Pending txs</span>
+          <span className="snapshot__value">{nodeHealthy || mempool.length ? displayMempoolCount : '—'}</span>
+          <span className="snapshot__sub">mempool</span>
+        </div>
+      </div>
+
+      {(!isolated || !sab) && (
+        <div className="dash__error">
+          This site must load with secure isolation headers so the node can run in-browser.
+          Open it via the normal HTTPS link (or <code>npm run dev</code> locally on localhost), not a raw IP address.
+        </div>
+      )}
+      {isolated && sab && !opfsOk && (
+        <div className="dash__error">
+          Storage is unavailable. Use Chrome or Edge on HTTPS (or <code>http://127.0.0.1</code>).
+        </div>
+      )}
+
+      <div className="lists-row">
         <section className="panel">
-          <h2>Peers ({peerCount || peers.length})</h2>
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>In</th>
-                  <th>Type</th>
-                  <th>Address</th>
-                  <th>Since</th>
-                </tr>
-              </thead>
-              <tbody>
-                {peers.length === 0 && (
-                  <tr><td colSpan={4} className="muted">No peers yet</td></tr>
-                )}
-                {peers.map((p) => (
-                  <tr key={String(p.id)}>
-                    <td>{String(p.inbound ?? '—')}</td>
-                    <td>{String(p.type ?? '—')}</td>
-                    <td className="mono">{String(p.address ?? '—')}</td>
-                    <td>{String(p.since ?? '—')}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="panel__head">
+            <h2>Connections</h2>
+            <span className="panel__count">{displayPeerCount}</span>
+          </div>
+          <div className="list">
+            {peers.length === 0 ? (
+              <p className="list__empty">
+                {nodeHealthy ? 'Waiting for peers…' : 'Start the node to connect'}
+              </p>
+            ) : (
+              peers.map((p) => {
+                const inbound = p.inbound === true || p.inbound === 'true' || p.inbound === 1 || p.inbound === '1';
+                const addr = String(p.address ?? '—');
+                return (
+                  <div className="list-item" key={String(p.id)}>
+                    <div className="list-item__row">
+                      <span className="list-item__main">
+                        {String(p.type || 'peer')}
+                      </span>
+                      <span className={`tag ${inbound ? 'tag--in' : 'tag--out'}`}>
+                        {inbound ? 'in' : 'out'}
+                      </span>
+                    </div>
+                    <div className="list-item__addr" title={addr}>
+                      {shortAddr(addr, 10)}
+                    </div>
+                    {p.since != null && p.since !== '' && (
+                      <div className="list-item__amounts">
+                        <span className="muted">since {String(p.since)}</span>
+                      </div>
+                    )}
+                  </div>
+                );
+              })
+            )}
           </div>
         </section>
 
         <section className="panel">
-          <h2>Mempool ({mempoolCount || mempool.length})</h2>
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>From</th>
-                  <th>To</th>
-                  <th>Amount</th>
-                  <th>Fee</th>
-                </tr>
-              </thead>
-              <tbody>
-                {mempool.length === 0 && (
-                  <tr><td colSpan={4} className="muted">Empty</td></tr>
-                )}
-                {mempool.map((tx) => (
-                  <tr key={String(tx.id ?? tx.txHash)}>
-                    <td className="mono">{shortAddr(tx.fromAddress)}</td>
-                    <td className="mono">{shortAddr(tx.toAddress)}</td>
-                    <td>{tx.amount ?? '—'}</td>
-                    <td>{tx.fee ?? '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="panel__head">
+            <h2>Pending transactions</h2>
+            <span className="panel__count">{displayMempoolCount}</span>
+          </div>
+          <div className="list">
+            {mempool.length === 0 ? (
+              <p className="list__empty">
+                {nodeHealthy ? 'No pending transactions' : 'Empty until the node is running'}
+              </p>
+            ) : (
+              mempool.map((tx) => (
+                <div className="list-item" key={String(tx.id ?? tx.txHash)}>
+                  <div className="list-item__row">
+                    <span className="list-item__main" title={String(tx.fromAddress || '')}>
+                      {shortAddr(tx.fromAddress, 5)}
+                      {' → '}
+                      {shortAddr(tx.toAddress, 5)}
+                    </span>
+                  </div>
+                  <div className="list-item__amounts">
+                    <span>
+                      <span className="muted">amount </span>
+                      {tx.amount ?? '—'}
+                    </span>
+                    <span>
+                      <span className="muted">fee </span>
+                      {tx.fee ?? '—'}
+                    </span>
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         </section>
       </div>
 
+      <details className="advanced">
+        <summary>
+          Advanced
+          <span className="advanced__hint">Network settings, diagnostics &amp; logs</span>
+        </summary>
+        <div className="advanced__body">
+          <div className="advanced__section">
+            <h3>Browser readiness</h3>
+            <div className="checks-grid">
+              <Stat label="Isolation" value={isolated ? 'OK' : 'Missing'} />
+              <Stat label="Shared memory" value={sab ? 'OK' : 'Missing'} />
+              <Stat label="Storage" value={opfsOk ? 'OK' : 'Missing'} />
+              <Stat label="Mode" value="Full node" />
+            </div>
+          </div>
+
+          <div className="advanced__section">
+            <h3>Public network</h3>
+            <p className="muted small" style={{ margin: '0 0 0.5rem' }}>
+              Connected via <strong>{OFFICIAL1.name}</strong>
+              {bridgeHttp.state === 'ok' && bridgeHttp.height != null
+                ? ` · network height #${bridgeHttp.height}`
+                : ''}
+            </p>
+            <div className="status-row">
+              <div className="status-card">
+                <span className="label">Network HTTP</span>
+                <span>
+                  {bridgeHttp.state === 'ok' && (
+                    <>OK{bridgeHttp.height != null ? ` · #${bridgeHttp.height}` : ''}</>
+                  )}
+                  {bridgeHttp.state === 'bad' && `Down · ${bridgeHttp.error}`}
+                  {bridgeHttp.state === 'checking' && 'Checking…'}
+                  {bridgeHttp.state === 'idle' && '—'}
+                </span>
+              </div>
+              <div className="status-card">
+                <span className="label">P2P bridge</span>
+                <span>
+                  {bridgeWs.state === 'ok' && `Open · ${bridgeWs.openedMs ?? '?'}ms`}
+                  {bridgeWs.state === 'bad' && `Not ready · ${bridgeWs.detail}`}
+                  {bridgeWs.state === 'skipped' && 'Not probed (safer)'}
+                  {bridgeWs.state === 'checking' && 'Checking…'}
+                  {bridgeWs.state === 'idle' && '—'}
+                </span>
+              </div>
+              <div className="status-card">
+                <span className="label">RPC stream</span>
+                <span>
+                  {bridgeStream.state === 'ok' && `Open · ${bridgeStream.openedMs ?? '?'}ms`}
+                  {bridgeStream.state === 'bad' && `Fail · ${bridgeStream.detail}`}
+                  {bridgeStream.state === 'skipped' && 'Optional · not used'}
+                  {bridgeStream.state === 'checking' && 'Checking…'}
+                  {bridgeStream.state === 'idle' && '—'}
+                </span>
+              </div>
+            </div>
+            {bridgeHttp.state === 'bad' && (
+              <div className="dash__error" style={{ marginTop: '0.5rem' }}>
+                Network probe failed ({bridgeHttp.error}). Starting the node may still work.
+              </div>
+            )}
+            {bridgeWs.state === 'bad' && (
+              <div className="dash__error" style={{ marginTop: '0.5rem' }}>
+                Bridge probe failed for <code className="mono">{wsPeers || OFFICIAL1.wsBridge}</code>
+                {bridgeWs.detail ? ` (${bridgeWs.detail})` : ''}.
+                You can still try Start if the browser is Ready.
+              </div>
+            )}
+          </div>
+
+          {chain && (
+            <div className="advanced__section">
+              <h3>Chain detail</h3>
+              <div className="chain-grid">
+                <Stat label="Height" value={String(chain.height)} />
+                <Stat label="Difficulty" value={formatHashrate(chain.difficulty)} />
+                <Stat label="Worksum" value={formatHashrate(chain.worksum)} />
+              </div>
+            </div>
+          )}
+
+          <div className="advanced__section">
+            <h3>Peer endpoint</h3>
+            <div className="controls__custom">
+              <input
+                type="text"
+                value={peersInput}
+                onChange={(e) => setPeersInput(e.target.value)}
+                disabled={running || starting}
+                placeholder={OFFICIAL1.wsBridge}
+                aria-label="WebSocket peer URL"
+              />
+              <div className="controls__actions">
+                <button type="button" className="btn" onClick={applyPeers} disabled={running || starting}>
+                  Save
+                </button>
+                <button type="button" className="btn btn--ghost" onClick={useOfficial1} disabled={running || starting}>
+                  Official1
+                </button>
+                {isLocalDevHost() && (
+                  <button type="button" className="btn btn--ghost" onClick={useLocalProxy} disabled={running || starting}>
+                    Local proxy
+                  </button>
+                )}
+              </div>
+            </div>
+            <div className="controls__meta" style={{ marginTop: '0.5rem' }}>
+              <span className="mono muted small" title={wsPeers}>WS_PEERS={wsPeers}</span>
+            </div>
+          </div>
+
+          <div className="advanced__section">
+            <h3>Tools</h3>
+            <div className="controls__actions">
+              <button
+                type="button"
+                className="btn btn--ghost"
+                onClick={() => runBridgeProbes(wsPeers, { probeP2pWs: false, probeStream: false })}
+                disabled={running || starting}
+              >
+                Re-check network
+              </button>
+              <button
+                type="button"
+                className="btn btn--ghost"
+                onClick={testRawWs}
+                disabled={running || starting}
+                title="Open WebSocket only — burns public /ws slot if pointed at Official1"
+              >
+                Test connection
+              </button>
+              <button
+                type="button"
+                className="btn btn--ghost"
+                onClick={() => runBridgeProbes(wsPeers, { probeP2pWs: true })}
+                disabled={running || starting}
+                title="Opens P2P /ws — burns Official1 per-IP slot for ~30s"
+              >
+                Probe P2P (caution)
+              </button>
+              <button
+                type="button"
+                className="btn btn--ghost"
+                onClick={clearOpfs}
+                disabled={!canClearOpfs}
+                title="Delete local chain databases for this site"
+              >
+                {clearingOpfs ? 'Clearing…' : 'Clear local data'}
+              </button>
+              <button
+                type="button"
+                className="btn btn--danger-ghost"
+                onClick={recoverOpfs}
+                disabled={starting || clearingOpfs || !opfsOk}
+                title="Clear storage and reload the page"
+              >
+                Recover &amp; reload
+              </button>
+            </div>
+          </div>
+
+          <details className="dash__help">
+            <summary>For operators (VPS / nginx)</summary>
+            <ol className="dash__checklist">
+              <li>
+                Browser needs isolation headers (COOP/COEP), WASM under{' '}
+                <code className="mono">/node/</code>, and{' '}
+                <code className="mono">WS_PEERS=wss://…/ws</code>.
+              </li>
+              <li>
+                Node flags:{' '}
+                <code className="mono">{OFFICIAL1.flags?.join(' ') || '—'}</code>
+              </li>
+              <li>
+                Nginx: proxy <code className="mono">/ws</code> to localhost with Upgrade + X-Forwarded-For.
+              </li>
+            </ol>
+          </details>
+        </div>
+      </details>
+
       <section className="panel">
-        <h2>Node console</h2>
+        <div className="panel__head">
+          <h2>Activity log</h2>
+          <span className="panel__count muted small" title={status}>
+            {status}
+          </span>
+        </div>
         <textarea
           ref={consoleRef}
           className="console"
           readOnly
           value={logLines.join('\n')}
           spellCheck={false}
+          aria-label="Node console log"
         />
       </section>
 
       <footer className="dash__footer">
         <p>
-          This runs the real <code>wart-node</code> binary compiled to WebAssembly in your browser
-          (see <code>public/node/wart-node.&#123;js,wasm,worker.js&#125;</code>).
-          It is a <strong>full node process in-tab</strong>, not a dashboard talking to someone else&apos;s
-          HTTP API. Peers reach the network through the WS bridge above.
+          A full Warthog node runs inside this browser tab via WebAssembly.
+          Leave the tab open while it syncs and stays connected.
         </p>
       </footer>
     </div>
