@@ -1,0 +1,77 @@
+---
+import WasmBrowserNode from '../components/WasmBrowserNode.jsx';
+import '../styles/global.css';
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" type="image/png" href="/img/main_logo.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="Run a full Warthog node in the browser via WebAssembly (WASM + pthreads)."
+    />
+    <title>Warthog Browser Full Node (WASM)</title>
+    {/*
+      Wipe OPFS before React/WASM mounts when recovering from locked SQLite DBs.
+      createSyncAccessHandle locks die with the previous document's workers;
+      this runs on the fresh document so removeEntry can succeed.
+    */}
+    <script is:inline>
+      window.__wartOpfsBootstrap = (async function wartOpfsBootstrap() {
+        try {
+          var params = new URLSearchParams(location.search);
+          var reset =
+            params.get('resetDb') === '1' ||
+            params.get('resetdb') === '1' ||
+            (function () {
+              try {
+                return sessionStorage.getItem('wartOpfsNeedsReset') === '1';
+              } catch (e) {
+                return false;
+              }
+            })();
+          if (!reset) return { skipped: true };
+          if (!navigator.storage || typeof navigator.storage.getDirectory !== 'function') {
+            return { ok: false, error: 'no OPFS' };
+          }
+          var root = await navigator.storage.getDirectory();
+          var removed = [];
+          var failed = [];
+          var names = [];
+          for await (var entry of root.entries()) {
+            names.push(entry[0]);
+          }
+          for (var i = 0; i < names.length; i++) {
+            var name = names[i];
+            try {
+              await root.removeEntry(name, { recursive: true });
+              removed.push(name);
+            } catch (e) {
+              failed.push(name + ': ' + (e && e.message ? e.message : e));
+            }
+          }
+          if (failed.length === 0) {
+            try {
+              sessionStorage.removeItem('wartOpfsNeedsReset');
+            } catch (e) {}
+            console.info('[opfs-bootstrap] wiped:', removed.length ? removed.join(', ') : '(empty)');
+            return { ok: true, removed: removed };
+          }
+          console.warn('[opfs-bootstrap] partial wipe; still locked:', failed.join('; '));
+          return { ok: false, removed: removed, failed: failed };
+        } catch (e) {
+          console.warn('[opfs-bootstrap]', e);
+          return { ok: false, error: String(e && e.message ? e.message : e) };
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root-app">
+      <WasmBrowserNode client:only="react" />
+    </div>
+  </body>
+</html>
